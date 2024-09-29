@@ -1,70 +1,57 @@
-import unittest
-from unittest.mock import patch, Mock
 from src.coletar_vagas import coletar_vagas
+import unittest
+from unittest.mock import patch, mock_open, MagicMock
+import json
+import os
 
-class TestColetarVagas(unittest.TestCase):
+class TestVagaColetor(unittest.TestCase):
 
-    @patch('src.coletar_vagas.requests.get')
-    def test_coletar_vagas_success(self, mock_get):
-        # Simulando uma resposta bem-sucedida da requisição
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.text = '''
-        <ul aria-label="Lista de Vagas">
-            <li data-testid="job-list__listitem">
-                <div class="sc-f5007364-4">Agente Escolar</div>
-                <div class="sc-f5007364-5">Maceió - AL</div>
-                <div class="sc-f5007364-6">Efetivo</div>
-            </li>
-            <li data-testid="job-list__listitem">
-                <div class="sc-f5007364-4">Agente Escolar</div>
-                <div class="sc-f5007364-5">São Paulo - SP</div>
-                <div class="sc-f5007364-6">Efetivo</div>
-            </li>
-            <li data-testid="job-list__listitem">
-                <div class="sc-f5007364-4">Analista Administrativo</div>
-                <div class="sc-f5007364-5">São Paulo - SP</div>
-                <div class="sc-f5007364-6">Efetivo</div>
-            </li>
-            <li data-testid="job-list__listitem">
-                <div class="sc-f5007364-4">Consultor Comercial - Trabalho Presencial (Salvador/BA)</div>
-                <div class="sc-f5007364-5">Salvador - BA</div>
-                <div class="sc-f5007364-6">Efetivo</div>
-            </li>
-        </ul>
-        '''
-        mock_get.return_value = mock_response
+    @patch('builtins.open', new_callable=mock_open, read_data='[]')
+    def test_carregar_cache(self, mock_file):
+        coletor = VagaColetor(cache_file='vagas_cache.json')
+        self.assertEqual(coletor.vagas_cache, [])
 
-        # Chama a função que está sendo testada
-        vagas = coletar_vagas()
+    @patch('builtins.open', new_callable=mock_open)
+    def test_salvar_cache(self, mock_file):
+        coletor = VagaColetor()
+        coletor.vagas_cache = [{'cargo': 'Desenvolvedor', 'localidade': 'São Paulo', 'efetividade': 'CLT'}]
+        coletor.salvar_cache()
+        mock_file().write.assert_called_once_with(json.dumps(coletor.vagas_cache))
 
-        # Verifica se as vagas foram coletadas corretamente
-        self.assertEqual(len(vagas), 4)
-        self.assertEqual(vagas[0]['cargo'], 'Agente Escolar')
-        self.assertEqual(vagas[0]['localidade'], 'Maceió - AL')
-        self.assertEqual(vagas[0]['efetividade'], 'Efetivo')
-        self.assertEqual(vagas[1]['cargo'], 'Agente Escolar')
-        self.assertEqual(vagas[1]['localidade'], 'São Paulo - SP')
-        self.assertEqual(vagas[1]['efetividade'], 'Efetivo')
-        self.assertEqual(vagas[2]['cargo'], 'Analista Administrativo')
-        self.assertEqual(vagas[2]['localidade'], 'São Paulo - SP')
-        self.assertEqual(vagas[2]['efetividade'], 'Efetivo')
-        self.assertEqual(vagas[3]['cargo'], 'Consultor Comercial - Trabalho Presencial (Salvador/BA)')
-        self.assertEqual(vagas[3]['localidade'], 'Salvador - BA')
-        self.assertEqual(vagas[3]['efetividade'], 'Efetivo')
+    @patch('requests.get')
+    @patch('time.sleep', return_value=None)  # Para evitar esperar durante os testes
+    def test_coletar_vagas(self, mock_sleep, mock_get):
+        mock_get.return_value = MagicMock(status_code=200, text='<ul aria-label="Lista de Vagas"><li data-testid="job-list__listitem"><div class="sc-f5007364-4">Desenvolvedor</div><div class="sc-f5007364-5">São Paulo</div><div class="sc-f5007364-6">CLT</div></li></ul>')
+        
+        coletor = VagaColetor()
+        vagas = coletor.coletar_vagas()
+        
+        self.assertEqual(len(vagas), 1)
+        self.assertEqual(vagas[0]['cargo'], 'Desenvolvedor')
+        self.assertEqual(vagas[0]['localidade'], 'São Paulo')
+        self.assertEqual(vagas[0]['efetividade'], 'CLT')
 
-    @patch('src.coletar_vagas.requests.get')
-    def test_coletar_vagas_failure(self, mock_get):
-        # Simulando uma resposta de erro da requisição
-        mock_response = Mock()
-        mock_response.status_code = 404
-        mock_get.return_value = mock_response
+    def test_validar_vaga(self):
+        coletor = VagaColetor()
+        vaga_valida = {'cargo': 'Desenvolvedor', 'localidade': 'São Paulo', 'efetividade': 'CLT'}
+        vaga_invalida = {'cargo': 'Desenvolvedor', 'localidade': 'São Paulo'}
+        
+        self.assertTrue(coletor.validar_vaga(vaga_valida))
+        self.assertFalse(coletor.validar_vaga(vaga_invalida))
 
-        # Chama a função que está sendo testada
-        vagas = coletar_vagas()
+    def test_filtrar_vagas(self):
+        coletor = VagaColetor()
+        coletor.vagas_cache = [
+            {'cargo': 'Desenvolvedor', 'localidade': 'São Paulo', 'efetividade': 'CLT'},
+            {'cargo': 'Analista', 'localidade': 'Rio de Janeiro', 'efetividade': 'PJ'},
+            {'cargo': 'Desenvolvedor', 'localidade': 'São Paulo', 'efetividade': 'PJ'}
+        ]
+        
+        vagas_filtradas = coletor.filtrar_vagas(localidade='São Paulo')
+        self.assertEqual(len(vagas_filtradas), 2)
 
-        # Verifica se a função retorna uma lista vazia em caso de erro
-        self.assertEqual(vagas, [])
+        vagas_filtradas = coletor.filtrar_vagas(efetividade='PJ')
+        self.assertEqual(len(vagas_filtradas), 1)
 
 if __name__ == '__main__':
     unittest.main()
